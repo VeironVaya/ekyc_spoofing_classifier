@@ -1,0 +1,68 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ekyc-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-ekyc_liveness}
+      MYSQL_USER: ${DB_USER:-ekyc_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-ekyc_app_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: ekyc-phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "8081:80"
+
+  # Internal-only, matches CLAUDE.md - no ports: mapping, reachable only by
+  # the backend over the Docker network.
+  inference:
+    build: ./inference
+    container_name: ekyc-inference
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: ekyc-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      inference:
+        condition: service_started
+    environment:
+      PORT: 8080
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-ekyc_app}
+      DB_PASSWORD: ${DB_PASSWORD:-ekyc_app_password}
+      DB_NAME: ${DB_NAME:-ekyc_liveness}
+      INFERENCE_URL: http://inference:8000/infer
+      EKYC_CHECK_URL: http://inference:8000/ekyc-check
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-changeme}
+      UPLOAD_DIR: /app/data/uploads
+      EKYC_UPLOAD_DIR: /app/data/registrations
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  mysql-data:

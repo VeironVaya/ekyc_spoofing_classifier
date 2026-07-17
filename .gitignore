@@ -1,0 +1,39 @@
+# secrets / local env
+.env
+!frontend/.env
+
+# evidence images / ID documents - never commit
+data/
+
+# model weights - large binary, handle via Git LFS or copy manually
+inference/model/*.pth
+
+# backend
+backend/bin/
+backend/*.exe
+
+# python
+inference/**/__pycache__/
+inference/**/*.pyc
+inference/**/*.egg-info/
+.venv/
+venv/
+
+# node
+frontend/node_modules/
+frontend/build/
+npm-debug.log*
+
+# Claude Code local session/tool state - not project source
+.claude/
+
+# IDE / editor
+.vscode/
+.idea/
+
+# os
+*.log
+.DS_Store
+Thumbs.db
+
+CLAUDE.md
