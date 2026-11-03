@@ -109,10 +109,67 @@ export async function updateRegistrationDecision(id, decision, apiKey) {
   return response.json();
 }
 
+export async function fetchApiRequests(apiKey) {
+  const response = await request(`${API_URL}/admin/api-requests`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  return response.json();
+}
+
 export async function fetchRegistrationImageUrl(id, type, apiKey) {
   const response = await request(`${API_URL}/admin/registrations/${id}/image?type=${type}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const blob = await response.blob();
   return URL.createObjectURL(blob);
+}
+
+// Mode 4: Standalone KTP Forgery (Doc-PAD) Check
+export async function checkKtpForgery(idCardBlob, mockClass = "") {
+  const formData = new FormData();
+  formData.append("file", idCardBlob, "ktp_card.jpg");
+  if (mockClass) {
+    formData.append("mock_class", mockClass);
+  }
+
+  const response = await request(
+    `${API_URL}/ktp-forgery`,
+    { method: "POST", body: formData },
+    EKYC_TIMEOUT_MS
+  );
+  return response.json();
+}
+
+// Mode 3: Complete Pipeline Preview (KTP Doc-PAD + OCR + Face Match + Selfie Liveness)
+export async function previewCompletePipeline(idCardBlob, selfieBlob, mockKtpClass = "") {
+  const formData = new FormData();
+  formData.append("id_card", idCardBlob, "id_card.jpg");
+  formData.append("selfie", selfieBlob, "selfie.jpg");
+  if (mockKtpClass) {
+    formData.append("mock_ktp_class", mockKtpClass);
+  }
+
+  const response = await request(
+    `${API_URL}/pipeline/preview`,
+    { method: "POST", body: formData },
+    EKYC_TIMEOUT_MS
+  );
+  return response.json();
+}
+
+// Mode 3: Complete Pipeline Final Registration
+export async function registerCompletePipeline(idCardBlob, selfieBlob, fields) {
+  const formData = new FormData();
+  formData.append("id_card", idCardBlob, "id_card.jpg");
+  formData.append("selfie", selfieBlob, "selfie.jpg");
+  if (fields?.nik) formData.append("nik", fields.nik);
+  if (fields?.name) formData.append("name", fields.name);
+  if (fields?.dob) formData.append("dob", fields.dob);
+
+  const response = await request(
+    `${API_URL}/pipeline/register`,
+    { method: "POST", body: formData },
+    EKYC_TIMEOUT_MS
+  );
+  return response.json();
 }

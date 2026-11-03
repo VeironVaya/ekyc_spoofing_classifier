@@ -2,11 +2,14 @@ import { useCallback, useState } from "react";
 import Header from "../components/Header";
 import Alert from "../components/Alert";
 import Spinner from "../components/Spinner";
+import StatsOverview from "../components/StatsOverview";
+import QualityPerformancePanel from "../components/QualityPerformancePanel";
 import {
   fetchAttempts,
   fetchAttemptImageUrl,
   fetchRegistrations,
   fetchRegistrationImageUrl,
+  fetchApiRequests,
   updateRegistrationDecision,
 } from "../services/api";
 
@@ -14,12 +17,14 @@ const ATTEMPT_DECISION_LABELS = {
   continue_registration: "Continue",
   manual_review: "Manual review",
   blocked_flagged: "Blocked",
+  rejected_poor_quality: "Quality rejected",
 };
 
 const ATTEMPT_DECISION_BADGE = {
   continue_registration: "badge-success",
   manual_review: "badge-warning",
   blocked_flagged: "badge-danger",
+  rejected_poor_quality: "badge-neutral",
 };
 
 const REGISTRATION_DECISION_LABELS = {
@@ -27,23 +32,32 @@ const REGISTRATION_DECISION_LABELS = {
   manual_review: "Manual review",
   rejected_face_mismatch: "Face mismatch",
   rejected_spoof: "Spoof",
+  rejected_ktp_forgery: "KTP Forgery",
   rejected_manual: "Rejected (manual)",
+  rejected_poor_quality: "Quality rejected",
 };
+
+function fmtScore(value) {
+  return typeof value === "number" ? value.toFixed(0) : "–";
+}
 
 const REGISTRATION_DECISION_BADGE = {
   approved: "badge-success",
   manual_review: "badge-warning",
   rejected_face_mismatch: "badge-danger",
   rejected_spoof: "badge-danger",
+  rejected_ktp_forgery: "badge-danger",
   rejected_manual: "badge-danger",
+  rejected_poor_quality: "badge-neutral",
 };
 
 export default function AdminDashboard() {
   const [apiKey, setApiKey] = useState("");
   const [authed, setAuthed] = useState(false);
-  const [tab, setTab] = useState("attempts");
+  const [tab, setTab] = useState("overview");
   const [attempts, setAttempts] = useState([]);
   const [registrations, setRegistrations] = useState([]);
+  const [apiRequests, setApiRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -58,12 +72,14 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [attemptsData, registrationsData] = await Promise.all([
+      const [attemptsData, registrationsData, apiRequestsData] = await Promise.all([
         fetchAttempts(key),
         fetchRegistrations(key),
+        fetchApiRequests(key),
       ]);
       setAttempts(attemptsData || []);
       setRegistrations(registrationsData || []);
+      setApiRequests(apiRequestsData || []);
       setAuthed(true);
     } catch (err) {
       setError(err.message);
@@ -163,7 +179,15 @@ export default function AdminDashboard() {
       <div className="page-body">
         <div className="admin-dashboard">
           <div className="admin-header">
-            <h1>{tab === "attempts" ? "Attempt Log" : "eKYC Registration Log"}</h1>
+            <h1>
+              {tab === "overview"
+                ? "Complete Pipeline Overview"
+                : tab === "attempts"
+                ? "Liveness Attempt Log (Legacy)"
+                : tab === "registrations"
+                ? "Pipeline Registration Log"
+                : "Quality & APM Performance"}
+            </h1>
             <div className="admin-header-actions">
               <button type="button" onClick={() => loadAll(apiKey)} disabled={loading}>
                 {loading && <Spinner />}
@@ -175,21 +199,44 @@ export default function AdminDashboard() {
           <div className="admin-tabs">
             <button
               type="button"
-              className={tab === "attempts" ? "active" : ""}
-              onClick={() => setTab("attempts")}
+              className={tab === "overview" ? "active" : ""}
+              onClick={() => setTab("overview")}
             >
-              Liveness Attempts ({attempts.length})
+              Overview
             </button>
             <button
               type="button"
               className={tab === "registrations" ? "active" : ""}
               onClick={() => setTab("registrations")}
             >
-              eKYC Registrations ({registrations.length})
+              Pipeline Registrations ({registrations.length})
             </button>
+            <button
+              type="button"
+              className={tab === "quality" ? "active" : ""}
+              onClick={() => setTab("quality")}
+            >
+              Quality & Performance
+            </button>
+            {attempts.length > 0 && (
+              <button
+                type="button"
+                className={tab === "attempts" ? "active" : ""}
+                onClick={() => setTab("attempts")}
+              >
+                Liveness Attempts ({attempts.length})
+              </button>
+            )}
           </div>
 
           <Alert type="error">{error}</Alert>
+
+          {tab === "overview" &&
+            (registrations.length === 0 && !loading ? (
+              <p className="empty-state">No pipeline registrations logged yet.</p>
+            ) : (
+              <StatsOverview registrations={registrations} />
+            ))}
 
           {tab === "attempts" &&
             (attempts.length === 0 && !loading ? (
@@ -204,6 +251,7 @@ export default function AdminDashboard() {
                       <th>Predicted Class</th>
                       <th>Confidence</th>
                       <th>Decision</th>
+                      <th>Quality (Blur/Bright)</th>
                       <th>Evidence</th>
                       <th>Timestamp</th>
                     </tr>
@@ -221,6 +269,12 @@ export default function AdminDashboard() {
                           <span className={`badge ${ATTEMPT_DECISION_BADGE[a.decision] || "badge-neutral"}`}>
                             {ATTEMPT_DECISION_LABELS[a.decision] || a.decision}
                           </span>
+                        </td>
+                        <td
+                          className="quality-cell"
+                          title={`Blur variance ${fmtScore(a.blur_score)} · Brightness ${fmtScore(a.brightness_score)} (0-255)`}
+                        >
+                          {fmtScore(a.blur_score)}/{fmtScore(a.brightness_score)}
                         </td>
                         <td>
                           {a.has_image ? (
@@ -258,6 +312,8 @@ export default function AdminDashboard() {
                       <th>Liveness</th>
                       <th>Face Match</th>
                       <th>Decision</th>
+                      <th>ID Quality (Blur/Bright)</th>
+                      <th>Selfie Quality (Blur/Bright)</th>
                       <th>Documents</th>
                       <th>Timestamp</th>
                       <th>Review</th>
@@ -275,13 +331,33 @@ export default function AdminDashboard() {
                         <td>
                           {r.liveness_predicted_class} ({(r.liveness_confidence * 100).toFixed(0)}%)
                         </td>
-                        <td>{r.face_match_verified ? "Matched" : "No match"}</td>
+                        <td>
+                          {r.face_match_verified ? "Matched" : "No match"}
+                          {r.face_match_distance != null && ` (${r.face_match_distance.toFixed(3)})`}
+                        </td>
                         <td>
                           <span
                             className={`badge ${REGISTRATION_DECISION_BADGE[r.decision] || "badge-neutral"}`}
                           >
                             {REGISTRATION_DECISION_LABELS[r.decision] || r.decision}
                           </span>
+                          {r.automated_decision && r.automated_decision !== r.decision && (
+                            <div className="decision-override-hint">
+                              was: {REGISTRATION_DECISION_LABELS[r.automated_decision] || r.automated_decision}
+                            </div>
+                          )}
+                        </td>
+                        <td
+                          className="quality-cell"
+                          title={`Blur variance ${fmtScore(r.id_card_blur_score)} · Brightness ${fmtScore(r.id_card_brightness_score)} (0-255)`}
+                        >
+                          {fmtScore(r.id_card_blur_score)}/{fmtScore(r.id_card_brightness_score)}
+                        </td>
+                        <td
+                          className="quality-cell"
+                          title={`Blur variance ${fmtScore(r.selfie_blur_score)} · Brightness ${fmtScore(r.selfie_brightness_score)} (0-255)`}
+                        >
+                          {fmtScore(r.selfie_blur_score)}/{fmtScore(r.selfie_brightness_score)}
                         </td>
                         <td className="doc-buttons">
                           {r.has_id_card_image && (
@@ -327,6 +403,17 @@ export default function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
+            ))}
+
+          {tab === "quality" &&
+            (attempts.length === 0 && registrations.length === 0 && apiRequests.length === 0 && !loading ? (
+              <p className="empty-state">No data logged yet.</p>
+            ) : (
+              <QualityPerformancePanel
+                attempts={attempts}
+                registrations={registrations}
+                apiRequests={apiRequests}
+              />
             ))}
 
           {imagePreview && (

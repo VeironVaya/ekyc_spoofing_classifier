@@ -14,5 +14,10 @@ type Registration struct {
 	IDCardImagePath        *string
 	SelfieImagePath        *string
 	Decision               string
+	AutomatedDecision      *string
+	IDCardBlurScore        *float64
+	IDCardBrightnessScore  *float64
+	SelfieBlurScore        *float64
+	SelfieBrightnessScore  *float64
 	CreatedAt              time.Time
 }

@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"ekyc-backend/internal/app/dtos"
+	"ekyc-backend/internal/app/middleware"
 	"ekyc-backend/internal/app/models"
 	"ekyc-backend/internal/app/repositories"
 	"ekyc-backend/internal/app/services"
@@ -18,10 +20,11 @@ import (
 )
 
 type LivenessController struct {
-	Repo         *repositories.SpoofAttemptRepository
-	InferenceSvc *services.InferenceService
-	DecisionSvc  *services.DecisionService
-	UploadDir    string
+	Repo           *repositories.SpoofAttemptRepository
+	InferenceSvc   *services.InferenceService
+	DecisionSvc    *services.DecisionService
+	UploadDir      string
+	ApiRequestRepo *repositories.APIRequestRepository
 }
 
 func NewLivenessController(
@@ -29,12 +32,14 @@ func NewLivenessController(
 	inferenceSvc *services.InferenceService,
 	decisionSvc *services.DecisionService,
 	uploadDir string,
+	apiRequestRepo *repositories.APIRequestRepository,
 ) *LivenessController {
 	return &LivenessController{
-		Repo:         repo,
-		InferenceSvc: inferenceSvc,
-		DecisionSvc:  decisionSvc,
-		UploadDir:    uploadDir,
+		Repo:           repo,
+		InferenceSvc:   inferenceSvc,
+		DecisionSvc:    decisionSvc,
+		UploadDir:      uploadDir,
+		ApiRequestRepo: apiRequestRepo,
 	}
 }
 
@@ -68,9 +73,42 @@ func (lc *LivenessController) Verify(c *gin.Context) {
 		return
 	}
 
+	inferenceStart := time.Now()
 	result, err := lc.InferenceSvc.CallInferenceService(imageBytes, req.Selfie.Filename)
 	if err != nil {
+		middleware.LogInternalCall(lc.ApiRequestRepo, "inference:/infer", inferenceStart, http.StatusBadGateway)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "inference service unavailable"})
+		return
+	}
+	middleware.LogInternalCall(lc.ApiRequestRepo, "inference:/infer", inferenceStart, http.StatusOK)
+
+	blurScore := result.BlurScore
+	brightnessScore := result.BrightnessScore
+
+	// A poor-quality capture is rejected before the spoof-decision logic ever
+	// sees it - it isn't evidence of spoofing, so it must not go through
+	// DecisionSvc.Decide or count toward the block-threshold history
+	// (GetPriorAttempts already excludes rejected_poor_quality rows).
+	if !result.QualityPassed {
+		attempt := &models.SpoofAttempt{
+			IDNumberHash:    idHash,
+			PredictedClass:  "quality_rejected",
+			Confidence:      0,
+			Decision:        string(services.DecisionRejectedPoorQuality),
+			BlurScore:       &blurScore,
+			BrightnessScore: &brightnessScore,
+		}
+		if _, err := lc.Repo.LogAttempt(attempt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not log attempt"})
+			return
+		}
+
+		c.JSON(http.StatusOK, dtos.VerifyResponse{
+			PredictedClass:      "quality_rejected",
+			Decision:            string(services.DecisionRejectedPoorQuality),
+			QualityPassed:       false,
+			QualityRejectReason: result.QualityRejectReason,
+		})
 		return
 	}
 
@@ -91,11 +129,13 @@ func (lc *LivenessController) Verify(c *gin.Context) {
 	}
 
 	attempt := &models.SpoofAttempt{
-		IDNumberHash:   idHash,
-		PredictedClass: result.PredictedClass,
-		Confidence:     result.Confidence,
-		ImagePath:      imagePath,
-		Decision:       string(decision),
+		IDNumberHash:    idHash,
+		PredictedClass:  result.PredictedClass,
+		Confidence:      result.Confidence,
+		ImagePath:       imagePath,
+		Decision:        string(decision),
+		BlurScore:       &blurScore,
+		BrightnessScore: &brightnessScore,
 	}
 	if _, err := lc.Repo.LogAttempt(attempt); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not log attempt"})
@@ -108,6 +148,7 @@ func (lc *LivenessController) Verify(c *gin.Context) {
 		IsLive:         result.IsLive,
 		AllScores:      result.AllScores,
 		Decision:       string(decision),
+		QualityPassed:  true,
 	})
 }
 
@@ -157,14 +198,16 @@ func (lc *LivenessController) ListAttempts(c *gin.Context) {
 	response := make([]dtos.AttemptResponse, 0, len(attempts))
 	for _, a := range attempts {
 		response = append(response, dtos.AttemptResponse{
-			ID:             a.ID,
-			IDNumberHash:   a.IDNumberHash,
-			PredictedClass: a.PredictedClass,
-			Confidence:     a.Confidence,
-			IsLive:         a.PredictedClass == "realperson",
-			Decision:       a.Decision,
-			HasImage:       a.ImagePath != nil,
-			CreatedAt:      a.CreatedAt,
+			ID:              a.ID,
+			IDNumberHash:    a.IDNumberHash,
+			PredictedClass:  a.PredictedClass,
+			Confidence:      a.Confidence,
+			IsLive:          a.PredictedClass == "realperson",
+			Decision:        a.Decision,
+			HasImage:        a.ImagePath != nil,
+			BlurScore:       a.BlurScore,
+			BrightnessScore: a.BrightnessScore,
+			CreatedAt:       a.CreatedAt,
 		})
 	}
 

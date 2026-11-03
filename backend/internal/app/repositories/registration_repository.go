@@ -18,10 +18,12 @@ func (r *RegistrationRepository) LogRegistration(reg *models.Registration) (int6
 	result, err := r.DB.Exec(
 		`INSERT INTO registrations
 		 (nik_hash, extracted_name, extracted_dob, liveness_predicted_class, liveness_confidence,
-		  face_match_verified, face_match_distance, id_card_image_path, selfie_image_path, decision)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  face_match_verified, face_match_distance, id_card_image_path, selfie_image_path, decision, automated_decision,
+		  id_card_blur_score, id_card_brightness_score, selfie_blur_score, selfie_brightness_score)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		reg.NIKHash, reg.ExtractedName, reg.ExtractedDOB, reg.LivenessPredictedClass, reg.LivenessConfidence,
-		reg.FaceMatchVerified, reg.FaceMatchDistance, reg.IDCardImagePath, reg.SelfieImagePath, reg.Decision,
+		reg.FaceMatchVerified, reg.FaceMatchDistance, reg.IDCardImagePath, reg.SelfieImagePath, reg.Decision, reg.AutomatedDecision,
+		reg.IDCardBlurScore, reg.IDCardBrightnessScore, reg.SelfieBlurScore, reg.SelfieBrightnessScore,
 	)
 	if err != nil {
 		return 0, err
@@ -32,7 +34,8 @@ func (r *RegistrationRepository) LogRegistration(reg *models.Registration) (int6
 func (r *RegistrationRepository) GetAllRegistrations(limit, offset int) ([]models.Registration, error) {
 	rows, err := r.DB.Query(
 		`SELECT id, nik_hash, extracted_name, extracted_dob, liveness_predicted_class, liveness_confidence,
-		        face_match_verified, face_match_distance, id_card_image_path, selfie_image_path, decision, created_at
+		        face_match_verified, face_match_distance, id_card_image_path, selfie_image_path, decision, automated_decision,
+		        id_card_blur_score, id_card_brightness_score, selfie_blur_score, selfie_brightness_score, created_at
 		 FROM registrations ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		limit, offset,
 	)
@@ -46,7 +49,9 @@ func (r *RegistrationRepository) GetAllRegistrations(limit, offset int) ([]model
 		var reg models.Registration
 		if err := rows.Scan(&reg.ID, &reg.NIKHash, &reg.ExtractedName, &reg.ExtractedDOB, &reg.LivenessPredictedClass,
 			&reg.LivenessConfidence, &reg.FaceMatchVerified, &reg.FaceMatchDistance, &reg.IDCardImagePath,
-			&reg.SelfieImagePath, &reg.Decision, &reg.CreatedAt); err != nil {
+			&reg.SelfieImagePath, &reg.Decision, &reg.AutomatedDecision,
+			&reg.IDCardBlurScore, &reg.IDCardBrightnessScore, &reg.SelfieBlurScore, &reg.SelfieBrightnessScore,
+			&reg.CreatedAt); err != nil {
 			return nil, err
 		}
 		regs = append(regs, reg)
@@ -73,12 +78,15 @@ func (r *RegistrationRepository) GetByID(id int64) (*models.Registration, error)
 	var reg models.Registration
 	err := r.DB.QueryRow(
 		`SELECT id, nik_hash, extracted_name, extracted_dob, liveness_predicted_class, liveness_confidence,
-		        face_match_verified, face_match_distance, id_card_image_path, selfie_image_path, decision, created_at
+		        face_match_verified, face_match_distance, id_card_image_path, selfie_image_path, decision, automated_decision,
+		        id_card_blur_score, id_card_brightness_score, selfie_blur_score, selfie_brightness_score, created_at
 		 FROM registrations WHERE id = ?`,
 		id,
 	).Scan(&reg.ID, &reg.NIKHash, &reg.ExtractedName, &reg.ExtractedDOB, &reg.LivenessPredictedClass,
 		&reg.LivenessConfidence, &reg.FaceMatchVerified, &reg.FaceMatchDistance, &reg.IDCardImagePath,
-		&reg.SelfieImagePath, &reg.Decision, &reg.CreatedAt)
+		&reg.SelfieImagePath, &reg.Decision, &reg.AutomatedDecision,
+		&reg.IDCardBlurScore, &reg.IDCardBrightnessScore, &reg.SelfieBlurScore, &reg.SelfieBrightnessScore,
+		&reg.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

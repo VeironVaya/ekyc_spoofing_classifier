@@ -16,8 +16,10 @@ func NewSpoofAttemptRepository(db *sql.DB) *SpoofAttemptRepository {
 
 func (r *SpoofAttemptRepository) LogAttempt(attempt *models.SpoofAttempt) (int64, error) {
 	result, err := r.DB.Exec(
-		`INSERT INTO spoof_attempts (id_number_hash, predicted_class, confidence, image_path, decision) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO spoof_attempts (id_number_hash, predicted_class, confidence, image_path, decision, blur_score, brightness_score)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		attempt.IDNumberHash, attempt.PredictedClass, attempt.Confidence, attempt.ImagePath, attempt.Decision,
+		attempt.BlurScore, attempt.BrightnessScore,
 	)
 	if err != nil {
 		return 0, err
@@ -27,11 +29,13 @@ func (r *SpoofAttemptRepository) LogAttempt(attempt *models.SpoofAttempt) (int64
 
 // GetPriorAttempts returns the attempt history for a hashed ID number, most
 // recent first. Call this before LogAttempt for the current attempt so the
-// history reflects what came strictly before it.
+// history reflects what came strictly before it. Quality-rejected attempts
+// are excluded - a blurry photo isn't evidence of spoofing and must not
+// count toward the block-threshold escalation in DecisionService.Decide.
 func (r *SpoofAttemptRepository) GetPriorAttempts(idNumberHash string) ([]models.SpoofAttempt, error) {
 	rows, err := r.DB.Query(
-		`SELECT id, id_number_hash, predicted_class, confidence, image_path, decision, created_at
-		 FROM spoof_attempts WHERE id_number_hash = ? ORDER BY created_at DESC`,
+		`SELECT id, id_number_hash, predicted_class, confidence, image_path, decision, blur_score, brightness_score, created_at
+		 FROM spoof_attempts WHERE id_number_hash = ? AND decision != 'rejected_poor_quality' ORDER BY created_at DESC`,
 		idNumberHash,
 	)
 	if err != nil {
@@ -42,7 +46,7 @@ func (r *SpoofAttemptRepository) GetPriorAttempts(idNumberHash string) ([]models
 	var attempts []models.SpoofAttempt
 	for rows.Next() {
 		var a models.SpoofAttempt
-		if err := rows.Scan(&a.ID, &a.IDNumberHash, &a.PredictedClass, &a.Confidence, &a.ImagePath, &a.Decision, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.IDNumberHash, &a.PredictedClass, &a.Confidence, &a.ImagePath, &a.Decision, &a.BlurScore, &a.BrightnessScore, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		attempts = append(attempts, a)
@@ -53,10 +57,10 @@ func (r *SpoofAttemptRepository) GetPriorAttempts(idNumberHash string) ([]models
 func (r *SpoofAttemptRepository) GetByID(id int64) (*models.SpoofAttempt, error) {
 	var a models.SpoofAttempt
 	err := r.DB.QueryRow(
-		`SELECT id, id_number_hash, predicted_class, confidence, image_path, decision, created_at
+		`SELECT id, id_number_hash, predicted_class, confidence, image_path, decision, blur_score, brightness_score, created_at
 		 FROM spoof_attempts WHERE id = ?`,
 		id,
-	).Scan(&a.ID, &a.IDNumberHash, &a.PredictedClass, &a.Confidence, &a.ImagePath, &a.Decision, &a.CreatedAt)
+	).Scan(&a.ID, &a.IDNumberHash, &a.PredictedClass, &a.Confidence, &a.ImagePath, &a.Decision, &a.BlurScore, &a.BrightnessScore, &a.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +71,7 @@ func (r *SpoofAttemptRepository) GetByID(id int64) (*models.SpoofAttempt, error)
 // the admin dashboard.
 func (r *SpoofAttemptRepository) GetAllAttempts(limit, offset int) ([]models.SpoofAttempt, error) {
 	rows, err := r.DB.Query(
-		`SELECT id, id_number_hash, predicted_class, confidence, image_path, decision, created_at
+		`SELECT id, id_number_hash, predicted_class, confidence, image_path, decision, blur_score, brightness_score, created_at
 		 FROM spoof_attempts ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		limit, offset,
 	)
@@ -79,7 +83,7 @@ func (r *SpoofAttemptRepository) GetAllAttempts(limit, offset int) ([]models.Spo
 	var attempts []models.SpoofAttempt
 	for rows.Next() {
 		var a models.SpoofAttempt
-		if err := rows.Scan(&a.ID, &a.IDNumberHash, &a.PredictedClass, &a.Confidence, &a.ImagePath, &a.Decision, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.IDNumberHash, &a.PredictedClass, &a.Confidence, &a.ImagePath, &a.Decision, &a.BlurScore, &a.BrightnessScore, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		attempts = append(attempts, a)

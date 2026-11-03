@@ -15,6 +15,11 @@ type RegistrationResponse struct {
 	FaceMatchVerified      bool      `json:"face_match_verified"`
 	FaceMatchDistance      *float64  `json:"face_match_distance,omitempty"`
 	Decision               string    `json:"decision"`
+	AutomatedDecision      string    `json:"automated_decision,omitempty"`
+	IDCardBlurScore        *float64  `json:"id_card_blur_score,omitempty"`
+	IDCardBrightnessScore  *float64  `json:"id_card_brightness_score,omitempty"`
+	SelfieBlurScore        *float64  `json:"selfie_blur_score,omitempty"`
+	SelfieBrightnessScore  *float64  `json:"selfie_brightness_score,omitempty"`
 	HasIDCardImage         bool      `json:"has_id_card_image"`
 	HasSelfieImage         bool      `json:"has_selfie_image"`
 	CreatedAt              time.Time `json:"created_at"`

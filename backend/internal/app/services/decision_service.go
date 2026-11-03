@@ -5,9 +5,10 @@ import "ekyc-backend/internal/app/models"
 type Decision string
 
 const (
-	DecisionContinue Decision = "continue_registration"
-	DecisionReview   Decision = "manual_review"
-	DecisionBlocked  Decision = "blocked_flagged"
+	DecisionContinue            Decision = "continue_registration"
+	DecisionReview              Decision = "manual_review"
+	DecisionBlocked             Decision = "blocked_flagged"
+	DecisionRejectedPoorQuality Decision = "rejected_poor_quality"
 )
 
 // blockThreshold is the number of prior spoof attempts for the same hashed

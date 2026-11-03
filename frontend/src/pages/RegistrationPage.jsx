@@ -5,6 +5,7 @@ import Header from "../components/Header";
 import Alert from "../components/Alert";
 import Spinner from "../components/Spinner";
 import { verifySelfie } from "../services/api";
+import { qualityRejectMessage } from "../utils/qualityMessages";
 
 export default function RegistrationPage() {
   const [idNumber, setIdNumber] = useState("");
@@ -42,6 +43,14 @@ export default function RegistrationPage() {
     setError(null);
     try {
       const data = await verifySelfie(idNumber.trim(), selfieBlob);
+      if (!data.quality_passed) {
+        // Not a spoof accusation - the model never even ran. Send the user
+        // straight back to recapture instead of showing the spoof-flavored
+        // result card.
+        setError(qualityRejectMessage(data.quality_reject_reason));
+        handleRetake();
+        return;
+      }
       setResult(data);
     } catch (err) {
       setError(err.message);

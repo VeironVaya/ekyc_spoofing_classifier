@@ -1,9 +1,10 @@
 import { useState } from "react";
-import CameraCapture from "../components/CameraCapture";
+import ImageCapture from "../components/ImageCapture";
 import Header from "../components/Header";
 import Alert from "../components/Alert";
 import Spinner from "../components/Spinner";
 import { previewEkyc, registerEkyc } from "../services/api";
+import { qualityRejectMessage } from "../utils/qualityMessages";
 
 const DECISION_LABELS = {
   approved: "Approved",
@@ -36,15 +37,15 @@ export default function EkycPage() {
     setError(null);
   };
 
-  const handleIdCardChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setError("Please choose an image file for the ID card.");
-      return;
-    }
-    setIdCardFile(file);
-    setIdCardPreview(URL.createObjectURL(file));
+  const handleIdCardCapture = (fileOrBlob) => {
+    setIdCardFile(fileOrBlob);
+    setIdCardPreview(URL.createObjectURL(fileOrBlob));
+    resetDownstream();
+  };
+
+  const handleIdCardClear = () => {
+    setIdCardFile(null);
+    setIdCardPreview(null);
     resetDownstream();
   };
 
@@ -58,6 +59,20 @@ export default function EkycPage() {
     setSelfieBlob(null);
     setSelfiePreview(null);
     resetDownstream();
+  };
+
+  // The backend can't attribute a rejection to a single image once both the
+  // ID card and selfie have been quality-checked together (only the
+  // selfie-only pre-check is unambiguous) - safest is to send the user back
+  // to recapture both rather than guess wrong and leave a bad photo in place.
+  const handleQualityRejected = (reason, selfieOnly) => {
+    setError(qualityRejectMessage(reason));
+    if (selfieOnly) {
+      handleRetakeSelfie();
+    } else {
+      handleStartOver();
+      setError(qualityRejectMessage(reason));
+    }
   };
 
   const handleExtract = async (e) => {
@@ -76,6 +91,10 @@ export default function EkycPage() {
     setError(null);
     try {
       const data = await previewEkyc(idCardFile, selfieBlob);
+      if (!data.quality_passed) {
+        handleQualityRejected(data.quality_reject_reason, false);
+        return;
+      }
       setCheckResult(data);
       setFields({
         nik: data.extracted_nik || "",
@@ -96,6 +115,10 @@ export default function EkycPage() {
     setError(null);
     try {
       const data = await registerEkyc(idCardFile, selfieBlob, fields);
+      if (!data.quality_passed) {
+        handleQualityRejected(data.quality_reject_reason, false);
+        return;
+      }
       setResult(data);
       setStage("result");
     } catch (err) {
@@ -128,27 +151,25 @@ export default function EkycPage() {
 
           {stage === "capture" && (
             <form onSubmit={handleExtract}>
-              <label>
-                ID Card Photo
-                <input type="file" accept="image/*" onChange={handleIdCardChange} disabled={loading} />
-              </label>
+              <ImageCapture
+                title="ID Card Photo"
+                preview={idCardPreview}
+                onCapture={handleIdCardCapture}
+                onClear={handleIdCardClear}
+                onError={setError}
+                disabled={loading}
+                defaultMode="upload"
+              />
 
-              {idCardPreview && (
-                <div className="selfie-preview">
-                  <img src={idCardPreview} alt="ID card" />
-                </div>
-              )}
-
-              {!selfiePreview ? (
-                <CameraCapture onCapture={handleSelfieCapture} />
-              ) : (
-                <div className="selfie-preview">
-                  <img src={selfiePreview} alt="Captured selfie" />
-                  <button type="button" className="secondary" onClick={handleRetakeSelfie} disabled={loading}>
-                    Retake
-                  </button>
-                </div>
-              )}
+              <ImageCapture
+                title="Selfie"
+                preview={selfiePreview}
+                onCapture={handleSelfieCapture}
+                onClear={handleRetakeSelfie}
+                onError={setError}
+                disabled={loading}
+                defaultMode="camera"
+              />
 
               <Alert type="error">{error}</Alert>
 

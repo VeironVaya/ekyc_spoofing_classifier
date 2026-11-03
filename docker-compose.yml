@@ -37,6 +37,8 @@ services:
     build: ./inference
     container_name: ekyc-inference
     restart: unless-stopped
+    volumes:
+      - ./inference/app:/app/app
 
   backend:
     build: ./backend
@@ -56,6 +58,8 @@ services:
       DB_NAME: ${DB_NAME:-ekyc_liveness}
       INFERENCE_URL: http://inference:8000/infer
       EKYC_CHECK_URL: http://inference:8000/ekyc-check
+      KTP_FORGERY_URL: http://inference:8000/ktp-forgery
+      PIPELINE_CHECK_URL: http://inference:8000/pipeline-check
       ADMIN_API_KEY: ${ADMIN_API_KEY:-changeme}
       UPLOAD_DIR: /app/data/uploads
       EKYC_UPLOAD_DIR: /app/data/registrations

@@ -1,6 +1,5 @@
 const NAV_ITEMS = [
-  { key: "liveness", label: "Liveness Check", href: "/" },
-  { key: "ekyc", label: "Full eKYC Demo", href: "/ekyc" },
+  { key: "pipeline", label: "Complete Pipeline", href: "/" },
   { key: "admin", label: "Admin", href: "/admin" },
 ];
 

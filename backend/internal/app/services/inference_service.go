@@ -11,10 +11,15 @@ import (
 )
 
 type InferenceResult struct {
-	PredictedClass string             `json:"predicted_class"`
-	Confidence     float64            `json:"confidence"`
-	IsLive         bool               `json:"is_live"`
-	AllScores      map[string]float64 `json:"all_scores"`
+	PredictedClass      string             `json:"predicted_class"`
+	Confidence          float64            `json:"confidence"`
+	IsLive              bool               `json:"is_live"`
+	AllScores           map[string]float64 `json:"all_scores"`
+	BlurScore           float64            `json:"blur_score"`
+	BrightnessScore     float64            `json:"brightness_score"`
+	FaceAreaRatio       float64            `json:"face_area_ratio"`
+	QualityPassed       bool               `json:"quality_passed"`
+	QualityRejectReason *string            `json:"quality_reject_reason"`
 }
 
 type InferenceService struct {

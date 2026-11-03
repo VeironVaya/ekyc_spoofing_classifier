@@ -12,12 +12,15 @@ IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
-def preprocess_image(image_bytes: bytes) -> torch.Tensor:
+def decode_image(image_bytes: bytes) -> np.ndarray:
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("Could not decode image")
+    return img
 
+
+def resize_and_normalize(img: np.ndarray) -> torch.Tensor:
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = cv2.resize(img, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_LINEAR)
 
@@ -27,3 +30,7 @@ def preprocess_image(image_bytes: bytes) -> torch.Tensor:
 
     tensor = torch.from_numpy(img).float().unsqueeze(0)
     return tensor
+
+
+def preprocess_image(image_bytes: bytes) -> torch.Tensor:
+    return resize_and_normalize(decode_image(image_bytes))

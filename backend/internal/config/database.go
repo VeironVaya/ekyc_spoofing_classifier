@@ -49,6 +49,8 @@ func migrate(db *sql.DB) error {
 			confidence DOUBLE NOT NULL,
 			image_path VARCHAR(255) NULL,
 			decision VARCHAR(32) NOT NULL DEFAULT '',
+			blur_score DOUBLE NULL,
+			brightness_score DOUBLE NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			INDEX idx_id_number_hash (id_number_hash)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -56,13 +58,19 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
-	// Covers tables created before the decision column existed. MySQL has no
-	// ADD COLUMN IF NOT EXISTS, so check information_schema first.
-	if err := addDecisionColumnIfMissing(db); err != nil {
+	// Covers tables created before these columns existed. MySQL has no ADD
+	// COLUMN IF NOT EXISTS, so check information_schema first.
+	if err := addColumnIfMissing(db, "spoof_attempts", "decision", "VARCHAR(32) NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "spoof_attempts", "blur_score", "DOUBLE NULL"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "spoof_attempts", "brightness_score", "DOUBLE NULL"); err != nil {
 		return err
 	}
 
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS registrations (
 			id BIGINT AUTO_INCREMENT PRIMARY KEY,
 			nik_hash CHAR(64) NULL,
@@ -75,19 +83,57 @@ func migrate(db *sql.DB) error {
 			id_card_image_path VARCHAR(255) NULL,
 			selfie_image_path VARCHAR(255) NULL,
 			decision VARCHAR(32) NOT NULL,
+			automated_decision VARCHAR(32) NULL,
+			id_card_blur_score DOUBLE NULL,
+			id_card_brightness_score DOUBLE NULL,
+			selfie_blur_score DOUBLE NULL,
+			selfie_brightness_score DOUBLE NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			INDEX idx_nik_hash (nik_hash)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+
+	if err := addColumnIfMissing(db, "registrations", "automated_decision", "VARCHAR(32) NULL"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "registrations", "id_card_blur_score", "DOUBLE NULL"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "registrations", "id_card_brightness_score", "DOUBLE NULL"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "registrations", "selfie_blur_score", "DOUBLE NULL"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "registrations", "selfie_brightness_score", "DOUBLE NULL"); err != nil {
+		return err
+	}
+
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS api_requests (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			method VARCHAR(8) NOT NULL,
+			route VARCHAR(128) NOT NULL,
+			status_code INT NOT NULL,
+			duration_ms DOUBLE NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_route_created_at (route, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+	`); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func addDecisionColumnIfMissing(db *sql.DB) error {
+func addColumnIfMissing(db *sql.DB, table, column, definition string) error {
 	var count int
 	err := db.QueryRow(`
 		SELECT COUNT(*) FROM information_schema.COLUMNS
-		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'spoof_attempts' AND COLUMN_NAME = 'decision'
-	`).Scan(&count)
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+	`, table, column).Scan(&count)
 	if err != nil {
 		return err
 	}
@@ -95,6 +141,6 @@ func addDecisionColumnIfMissing(db *sql.DB) error {
 		return nil
 	}
 
-	_, err = db.Exec(`ALTER TABLE spoof_attempts ADD COLUMN decision VARCHAR(32) NOT NULL DEFAULT ''`)
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
 	return err
 }

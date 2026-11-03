@@ -16,8 +16,12 @@ def verify_faces(id_card_bytes: bytes, selfie_bytes: bytes) -> dict:
             model_name=MODEL_NAME,
         )
     except ValueError as exc:
-        # Most commonly: no face detected in one of the two images.
-        return {"verified": False, "distance": None, "threshold": None, "error": str(exc)}
+        # DeepFace wraps the real reason (usually "face could not be detected
+        # in img1/img2") in a generic "Exception while processing imgN_path"
+        # and chains the original as __cause__ - unwrap it so the message is
+        # actually actionable instead of just naming which image failed.
+        reason = str(exc.__cause__) if exc.__cause__ is not None else str(exc)
+        return {"verified": False, "distance": None, "threshold": None, "error": reason}
 
     return {
         "verified": bool(result["verified"]),

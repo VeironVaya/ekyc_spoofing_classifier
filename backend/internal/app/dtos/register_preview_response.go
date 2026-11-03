@@ -14,4 +14,6 @@ type RegisterPreviewResponse struct {
 	FaceMatchVerified      bool     `json:"face_match_verified"`
 	FaceMatchDistance      *float64 `json:"face_match_distance,omitempty"`
 	FaceMatchError         string   `json:"face_match_error,omitempty"`
+	QualityPassed          bool     `json:"quality_passed"`
+	QualityRejectReason    *string  `json:"quality_reject_reason,omitempty"`
 }

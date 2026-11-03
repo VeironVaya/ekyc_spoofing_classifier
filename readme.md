@@ -1,155 +1,221 @@
-# eKYC Demo — Liveness Detection, OCR & Face Match
+# 🛡️ Indonesian e-KYC & Anti-Spoofing Service
 
-A demo electronic KYC (know-your-customer) pipeline for a banking registration flow, built as an internship project. It started as a single-purpose **liveness detection (anti-spoofing) service** and grew into a small end-to-end eKYC demo: capture a selfie, catch spoof attempts, read an ID card, and match the face on the card against the person holding it — with a human always able to review and correct what the machine got wrong.
+An end-to-end, multi-pillar electronic Know-Your-Customer (e-KYC) and anti-fraud onboarding platform designed for banking registration flows.
 
-This is a demo, not a production KYC system. OCR and face-matching are best-effort, not certified accuracy — see [Limitations](#limitations--honest-scope) before assuming otherwise.
+The platform provides a defense-in-depth verification pipeline combining **Deep Learning Document PAD (KTP Forgery Detection)**, **Deterministic NIK Validation**, **Single-Frame Face Liveness PAD**, **1:1 ArcFace Biometric Verification**, and a **Graduated Risk Decision Engine**.
 
-## Why this exists
+---
 
-Most anti-spoofing demos stop at "photo of a photo → reject." Two things this project does differently:
+## 📌 Architecture & Verification Pipeline
 
-1. **Graduated response instead of a hard block.** A single flagged attempt doesn't ban anyone. Spoof attempts are tied to a hashed ID number, and the decision escalates only as repeat attempts accumulate (`continue_registration` → `manual_review` → `blocked_flagged`). One bad photo shouldn't lock a genuine user out of their own registration.
-2. **OCR/face-match feed a human, not a black box.** ID card OCR and face-matching are both genuinely unreliable at demo-grade accuracy — trusting them blindly to auto-approve or auto-reject a registration is the wrong call. So the eKYC flow runs the checks, shows the extracted NIK/name/DOB to the user in an editable form for correction, and only *then* re-verifies liveness and face-match server-side (never trusting a client-supplied "it already checked out") before logging a final decision. Getting a field wrong routes to manual review instead of silently completing with bad data.
+```mermaid
+flowchart LR
+    A["👤 User Ingestion<br/>(KTP Card + Live Selfie)"] --> B["⚙️ Microservices AI Engine<br/>(Internal PyTorch + FastAPI)"]
+    
+    subgraph Pillars ["4 Defense-in-Depth Pillars"]
+        P1["Pillar 1: Doc-PAD<br/>ConvNeXt-Small 5-Class<br/>(Screen/Print/Template/Other)"]
+        P2["Pillar 2: NIK Rules<br/>16-Digit, Province Code,<br/>Female (DD+40) Formula"]
+        P3["Pillar 3: Selfie Liveness<br/>ConvNeXt-Small 6-Class<br/>(Mask/Screen/Print/Mannequin)"]
+        P4["Pillar 4: Face Matching<br/>ArcFace Cosine Distance<br/>(KTP Portrait vs Selfie)"]
+    end
 
-## What it does
+    B --> P1
+    B --> P2
+    B --> P3
+    B --> P4
 
-- **Liveness check** (`/verify`): single selfie in, 6-way classification out (`realperson` vs. four spoof types: printed photo, mask, mannequin, screen-replay, plus an `unknown` bucket). Genuine attempts leave no image on disk — only flagged spoof attempts are saved as evidence, by design.
-- **Full eKYC registration** (`/ekyc`): ID card photo + selfie in. Runs liveness, OCR (NIK / name / date of birth), and face match between the ID photo and the selfie, concurrently. Shows you the extracted fields to review/correct, then submits.
-- **Admin dashboard** (`/admin`): API-key-gated log of every liveness attempt and every eKYC registration, with evidence images, and the ability to manually approve or reject a registration after eyeballing the documents yourself.
-- **phpMyAdmin**: optional web UI onto the underlying MySQL database for poking at the raw data.
+    P1 --> DEC["⚖️ Waterfall Decision Engine<br/>(Go Backend)"]
+    P2 --> DEC
+    P3 --> DEC
+    P4 --> DEC
 
-## Architecture
+    DEC --> RES{"Outcome"}
+    RES -->|"All Passed"| AP["✅ Approved"]
+    RES -->|"Suspicious NIK"| MR["⚠️ Manual Review"]
+    RES -->|"Fake KTP"| RJ1["❌ Rejected: KTP Forgery"]
+    RES -->|"Biometric Spoof"| RJ2["❌ Rejected: Selfie Spoof"]
+    RES -->|"Face Mismatch"| RJ3["❌ Rejected: Mismatch"]
 
+    AP --> DB[("MySQL Database<br/>SHA-256 Hashed IDs")]
+    MR --> DB
+    RJ1 --> DB
+    RJ2 --> DB
+    RJ3 --> DB
+
+    DB --> ADM["📊 Admin APM Dashboard<br/>(Evidence & Microservice Latency)"]
 ```
-Browser → Nginx (native, prod) or CRA dev server (local)
-             │
-             ▼
-     Go + Gin backend (Docker)  ──HTTP──►  Python + FastAPI inference service (Docker, internal-only)
-             │                                    - ConvNeXt-Small liveness classifier (PyTorch)
-             ▼                                    - Tesseract OCR (ID field extraction)
-        MySQL (Docker)                            - DeepFace / ArcFace (face match)
-```
 
-| Layer | Stack | Notes |
+---
+
+## 🚀 Key Features
+
+| Capability | Technology | Description |
 |---|---|---|
-| Frontend | React (CRA) | Served by native Nginx in prod, not Dockerized |
-| Backend | Go + Gin | Layered `controllers → services → repositories`; only this service talks to MySQL and the inference service |
-| Inference | Python + FastAPI | **Internal-only** — no host-exposed port, reachable only from the backend over the Docker network |
-| Database | MySQL 8 | Two tables: `spoof_attempts` (liveness-only flow) and `registrations` (eKYC flow) |
+| **KTP Forgery Detection (Doc-PAD)** | ConvNeXt-Small (`timm`) | 5-class classifier detecting physical screen replays, printed cardstock, synthetic dummy templates, and non-KTP documents. |
+| **Deterministic Indonesian NIK Engine** | Custom Regex & Math Checksum | Validates 16-digit structure, Kemendagri province codes (11–94), female birth date offset ($DD + 40$), and OCR cross-field consistency. |
+| **Selfie Face Liveness (Biometric PAD)** | ConvNeXt-Small (Fine-tuned) | 6-class presentation attack detector: `realperson`, `fake_printed`, `fake_mask`, `fake_mannequin`, `fake_screen`, `fake_unknown`. |
+| **1:1 ArcFace Biometric Matching** | DeepFace (ArcFace 512-D) | Computes normalized cosine distance between the cropped KTP portrait and webcam selfie (threshold $\le 0.68$). |
+| **ID Field Extraction & OCR** | Tesseract OCR + CLAHE | Extracts NIK, Full Name, and Date of Birth with bilateral filter contrast normalization and character correction. |
+| **Graduated Decision Engine** | Go + Gin | History-aware risk scoring tied to SHA-256 hashed IDs, preventing immediate lockout on accidental camera glare. |
+| **Admin APM Dashboard** | React + Recharts | Real-time APM telemetry, latency tracking, threat vector waterfall analytics, and manual compliance override controls. |
 
-Deployment target is a single Azure VM: Docker for backend/inference/MySQL, native Nginx as the only public entry point reverse-proxying to the backend.
+---
 
-## Models & inference, in detail
+## 🛠️ Tech Stack
 
-Three separate models run inside the Python inference service (`inference/app/`), each doing one narrow job — no single model tries to do everything.
+- **Backend**: Go (Gin framework), GORM/database/sql, Dockerized.
+- **AI / Inference**: Python 3.10, FastAPI, PyTorch, DeepFace, OpenCV, Tesseract OCR. Internal microservice (**no host-exposed ports**).
+- **Frontend**: React (SPA), Recharts, native webcam media streaming.
+- **Database**: MySQL 8.0 with phpMyAdmin console.
+- **Containerization**: Docker & Docker Compose.
 
-### 1. Liveness classifier (`model_loader.py`, `preprocess.py`)
+---
 
-- **Architecture**: `convnext_small.fb_in22k_ft_in1k` (ConvNeXt-Small) loaded via `timm`, head replaced for `num_classes=6`.
-- **Weights**: `model_fold_0.pth` (~189 MB) — confirmed to be a raw `state_dict` (`torch.save(model.state_dict(), ...)`), not a full checkpoint object, so the loader calls `timm.create_model(..., pretrained=False)` and loads the state dict directly (stripping any `module.` prefix from a DataParallel-trained checkpoint).
-- **Classes** (fixed order, must match training): `fake_mannequin`, `fake_mask`, `fake_printed`, `fake_screen`, `fake_unknown`, `realperson`.
-- **Preprocessing** (must exactly match training): resize to 256×256 (`cv2.INTER_LINEAR`), BGR→RGB, scale to `[0,1]`, normalize with ImageNet mean/std (`[0.485,0.456,0.406]` / `[0.229,0.224,0.225]`), transpose to `CHW`, single-image batch.
-- **Inference**: single forward pass, `softmax` over the 6 logits, `argmax` for the predicted class, `is_live = (predicted_class == "realperson")`.
-- **Runtime**: CPU-only PyTorch (`torch==2.5.1` / `torchvision==0.20.1`, installed from the `download.pytorch.org/whl/cpu` index — no CUDA, no GPU, matches the target Azure VM).
+## 🏃 Step-by-Step Quickstart Guide (Using Docker)
 
-### 2. OCR — ID field extraction (`ocr.py`)
+Follow these steps to run the entire stack locally.
 
-Plain Tesseract (`pytesseract`), no layout model, no fine-tuning — deliberately kept simple for a demo, with real effort put into not being *confidently wrong*:
+### Prerequisites
 
-- **Preprocessing**: grayscale → upscale if the image's longer side is under 1800px (small phone photos need more resolution for Tesseract to resolve small print) → bilateral-filter denoise → CLAHE local contrast boost (`clipLimit=2.0`, 8×8 tiles). Deliberately **no hard binarization** (no Otsu/adaptive threshold) — that was tried and benchmarked against a synthetic KTP-style test image, and both thresholding approaches made recognition *worse* than just denoising + contrast-boosting and leaving the image in grayscale, since Tesseract's LSTM engine (`--oem 1`) already does its own adaptive binarization internally.
-- **OCR call**: `pytesseract.image_to_string(image, lang="ind+eng", config="--oem 1 --psm 6")` — `ind+eng` because Indonesian KTP field labels (Nama, Tempat/Tgl Lahir, Kewarganegaraan, …) mix with Latin-alphabet/digit content; `--psm 6` treats the card as a single uniform block of text, which matches a KTP's dense label/value layout better than the default automatic page-segmentation mode.
-- **NIK extraction**: scoped strictly to the text *after* a `\bNIK\b` label match (word-boundary, so it doesn't false-trigger on substrings). If the raw digit count there isn't exactly 16, a letter/digit confusion map is applied first (`O→0, I/l/i→1, S/s→5, B→8, Z→2, G→6, A→4, T→7, g→9`) — Tesseract frequently swaps these on small print. If it *still* doesn't resolve to a clean 16-digit run, a best-effort guess fills any remaining unrecognized character with `5` as a placeholder, rather than either leaving the field blank or inventing a wrong-looking-plausible number. Earlier iterations without the label-scoping occasionally stitched together a coincidental 16-digit sequence from unrelated noise elsewhere on the page — a wrong-but-confident answer, which is strictly worse for a KYC decision than an honest placeholder the human is expected to correct.
-- **Name extraction**: scoped to the text after a `nama` label match; no fuzzy fallback if that label isn't found — an empty field beats a hallucinated name.
-- **Date of birth**: a permissive `DD-MM-YYYY`/`DD/MM/YYYY`-shaped regex over the whole raw text.
-- Every field (and the full raw OCR text) is surfaced to the user in the review form before it's ever saved — the extraction only has to get the human close enough to fix, not be perfect.
+Ensure you have installed:
+- **Docker Desktop** (version 20.10+ with Compose V2 enabled)
+- **Node.js** (v18 or v20, for running the frontend interface)
+- **Git**
 
-### 3. Face match (`face_match.py`)
+---
 
-- **Model**: `DeepFace.verify(img1_path=id_card_image, img2_path=selfie_image, model_name="ArcFace")` — ArcFace embeddings, cosine-distance comparison against DeepFace's built-in threshold for that model, default (`opencv`) face detector backend.
-- **Weights baked into the Docker image at build time** (`RUN python -c "from deepface import DeepFace; DeepFace.build_model('ArcFace')"` in `inference/Dockerfile`) — without this, the ~130 MB ArcFace weights download from GitHub on the *first* request after every container restart (`/root/.deepface` isn't a persisted volume), which was blowing past a naive request timeout. Baking them in means every container starts ready.
-- **Failure handling**: if either image has no detectable face, DeepFace raises `ValueError` — caught and turned into a structured `{verified: false, error: "..."}` response instead of a 500.
-- **CPU-only TensorFlow**: DeepFace pulls in `tensorflow` as a transitive dependency of `tf-keras` even with `tensorflow-cpu` pinned explicitly (a known pip resolution quirk — both packages end up installed, ~840 MB combined). Left as-is; it works, and the inefficiency is a demo-acceptable tradeoff, not a correctness issue.
+### Step 1: Clone the Repository
 
-### Concurrency
+```bash
+git clone https://github.com/your-username/indonesian-ekyc-pipeline.git
+cd indonesian-ekyc-pipeline
+```
 
-`POST /ekyc-check` runs OCR and face-match **concurrently** (`asyncio.gather` + `asyncio.to_thread`, since both are blocking calls) rather than back-to-back — combined with the baked-in ArcFace weights, this took a full `/register` round trip from potentially hitting a 120-second cold-start ceiling down to roughly 1.5–2 seconds in steady state.
+---
 
-## Decision logic
+### Step 2: Configure Environment Variables
 
-Two independent decision engines — the liveness-only flow and the eKYC flow are deliberately not the same logic, because they're answering different questions.
+Copy the provided example environment file:
 
-**Liveness-only (`decision_service.go`)** — tied to a SHA-256 hash of the submitted ID number, with memory of that hash's prior attempts:
+```bash
+cp .env.example .env
+```
 
-| Current result | Prior spoof attempts (same hashed ID) | Decision |
+The default values are configured out-of-the-box for local testing:
+```ini
+MYSQL_ROOT_PASSWORD=rootpassword
+DB_NAME=ekyc_liveness
+DB_USER=ekyc_app
+DB_PASSWORD=ekyc_app_password
+ADMIN_API_KEY=changeme
+```
+
+---
+
+### Step 3: Model Weights Placement
+
+Place the trained PyTorch weights in `inference/model/`:
+- `model_fold_0.pth` — ConvNeXt-Small Face Liveness model (6 classes, ~189 MB).
+- `best_convnext_small_ktp_pad.pth` — ConvNeXt-Small KTP Doc-PAD model (5 classes, ~189 MB).
+
+> **Note**: If testing without local model weights, the inference container gracefully allows testing simulated attack scenarios directly from the UI dropdown override (`real_ktp`, `fake_screen`, `fake_print`, `fake_template`).
+
+---
+
+### Step 4: Build and Launch the Docker Stack
+
+Start the backend, inference service, MySQL database, and phpMyAdmin:
+
+```bash
+docker compose up --build -d
+```
+
+Verify that all 4 containers are healthy:
+```bash
+docker compose ps
+```
+
+---
+
+### Step 5: Start the Frontend Interface
+
+In a separate terminal, install dependencies and start the React client:
+
+```bash
+cd frontend
+npm install
+npm start
+```
+
+---
+
+### Step 6: Access the Platform
+
+Open your browser to the following URLs:
+
+| Service | URL | Default Credentials / Note |
 |---|---|---|
-| Genuine (`realperson`) | < 3 | `continue_registration` |
-| Genuine (`realperson`) | ≥ 3 | `manual_review` (clean now, but risky history) |
-| Spoof | < 3 | `manual_review` |
-| Spoof | ≥ 3 | `blocked_flagged` |
+| **Complete e-KYC Pipeline** | `http://localhost:3000/` | Public user onboarding flow (Upload KTP + Selfie) |
+| **Admin APM Dashboard** | `http://localhost:3000/admin` | API Key: `changeme` |
+| **Backend REST API** | `http://localhost:8080` | Go Gin API endpoints |
+| **phpMyAdmin Console** | `http://localhost:8081` | User: `ekyc_app` / Pass: `ekyc_app_password` |
 
-**eKYC registration (`ekyc_controller.go`)** — evaluated in order, first match wins:
+---
 
-1. `!is_live` → `rejected_spoof`
-2. `!face_match_verified` → `rejected_face_mismatch`
-3. Final NIK (OCR value, or the user's corrected one from the review form) doesn't match `^\d{16}$` → `manual_review`
-4. Otherwise → `approved`
+## 🔒 Security & Privacy by Design
 
-An admin can override any registration's decision afterward via `PATCH /admin/registrations/:id/decision` to `approved` or `rejected_manual` — logged as `rejected_manual` specifically (not reusing `rejected_spoof`/`rejected_face_mismatch`) so the log always shows whether a rejection was an automated reason or a human call.
+- **Zero Plaintext NIK Storage**: Raw identity numbers are never persisted or logged in plaintext. Every NIK is irreversibly hashed using **SHA-256** prior to database storage (`utils/hash.go`).
+- **Internal-Only Inference Boundary**: The Python inference engine has **no host-exposed port** in `docker-compose.yml`. It is accessible exclusively through the internal Docker bridge network by the Go backend.
+- **Server-Side Raw Byte Re-Verification**: The client preview step is never trusted. Final registration re-evaluates all document authenticity, liveness, and face-match checks directly on raw byte arrays server-side.
+- **Selective Audit Retention**: Unflagged genuine liveness checks discard selfie images after inference. Only flagged spoof attempts and formal KYC registrations preserve audit evidence images.
 
-## API reference
+---
 
-**Inference service** (internal-only, not reachable outside the Docker network):
+## 📂 Project Directory Structure
 
-| Route | Purpose |
-|---|---|
-| `GET /health` | liveness probe, reports whether the model loaded |
-| `POST /infer` | single selfie → liveness classification |
-| `POST /ekyc-check` | ID card + selfie → OCR fields + face-match result (no persistence) |
-
-**Backend** (`http://localhost:8080`):
-
-| Route | Auth | Purpose |
-|---|---|---|
-| `POST /verify` | none | liveness-only check, logs to `spoof_attempts`, graduated decision |
-| `POST /register/preview` | none | runs liveness + OCR + face-match, returns results for review — saves nothing |
-| `POST /register` | none | final submit: re-verifies liveness/face-match from the actual images, accepts optional `nik`/`name`/`dob` overrides from the review form, saves both images + logs to `registrations` |
-| `GET /admin/attempts` | Bearer `ADMIN_API_KEY` | list liveness attempts |
-| `GET /admin/attempts/:id/image` | Bearer `ADMIN_API_KEY` | evidence image (spoof attempts only) |
-| `GET /admin/registrations` | Bearer `ADMIN_API_KEY` | list eKYC registrations |
-| `GET /admin/registrations/:id/image?type=id_card\|selfie` | Bearer `ADMIN_API_KEY` | registration evidence image |
-| `PATCH /admin/registrations/:id/decision` | Bearer `ADMIN_API_KEY` | manually set `decision` to `approved` or `rejected_manual` |
-
-## Notable design decisions
-
-- **Privacy-by-design evidence retention diverges by flow.** `/verify` only ever saves an image for a *flagged* attempt — a genuine user's selfie never touches disk. `/register` saves both images for every attempt regardless of outcome, since a KYC registration record is expected to retain what was submitted. This is intentional, not an inconsistency.
-- **ID numbers are never stored in plaintext.** Only a SHA-256 hash is persisted; raw ID numbers are never logged.
-- **Evidence images are never served as static files.** They're only reachable through an auth-gated `GET .../:id/image` route — Nginx never serves the upload directory directly.
-- **The final `/register` call never trusts the earlier preview.** Liveness and face-match are always re-derived from the actual submitted image bytes at confirm time, even though `/register/preview` already computed them once — a client can't fake having passed the anti-spoof check.
-
-## Running it
-
-**Full stack (backend + inference + MySQL + phpMyAdmin):**
-```
-docker compose up -d
-```
-- Backend: `http://localhost:8080`
-- phpMyAdmin: `http://localhost:8081` (log in with `DB_USER`/`DB_PASSWORD` or `root`/`MYSQL_ROOT_PASSWORD` from `.env`)
-- MySQL: exposed on `3306` for any client
-
-**Frontend (not Dockerized):**
-```
-cd frontend && npm start
-```
-Runs at `http://localhost:3000` — `/` for the simple liveness check, `/ekyc` for the full demo, `/admin` for the dashboard (needs `ADMIN_API_KEY` from `.env`).
-
-**Backend alone, without Docker:**
-```
-cd backend && go run cmd/main.go
+```text
+├── backend/                  # Go REST API backend
+│   ├── cmd/main.go           # Application entrypoint
+│   └── internal/app/         # Clean architecture (controllers, services, repositories)
+├── inference/                # Python FastAPI AI microservice (Internal Docker)
+│   ├── app/
+│   │   ├── ktp_forgery.py    # KTP Doc-PAD inference & heuristic analysis
+│   │   ├── face_match.py     # DeepFace ArcFace 1:1 biometric matching
+│   │   ├── ocr.py            # Tesseract OCR & NIK regex parser
+│   │   ├── quality.py        # OpenCV blur & brightness gate
+│   │   └── main.py           # FastAPI service routes
+│   └── model/                # PyTorch model weights (.pth)
+├── frontend/                 # React web application
+│   └── src/
+│       ├── pages/            # CompletePipelinePage & AdminDashboard
+│       ├── components/       # ImageCapture, StatsOverview, QualityPerformancePanel
+│       └── utils/            # NIK validators, chart color taxonomy
+├── notebooks/                # Jupyter research & training workspace
+├── docs/                     # Architectural documentation, diagrams, prompts
+├── scripts/                  # Dataset downloader & augmentation CLI utilities
+├── docker-compose.yml        # Multi-container orchestration
+└── .gitignore                # Safe Git ignore configuration
 ```
 
-## Limitations & honest scope
+---
 
-- OCR and face-match accuracy are demo-grade (plain Tesseract, ArcFace with no fine-tuning) — not a certified-accuracy KYC pipeline, and not claimed to be one.
-- No video or challenge-response liveness — the model is single-image only.
-- No cross-check against an actual government ID database — a NIK is only validated for *format* (16 digits), not *existence*.
-- No CI/CD — deploys are manual (`git pull` + build + `rsync` to the VM) for now.
+## 📊 Admin APM & Monitoring Features
+
+The Admin Dashboard (`/admin`) provides visibility into:
+1. **Multi-Pillar KPIs**: Total pipeline submissions, approval rate, biometric match rate, selfie liveness rate, and KTP authenticity rate.
+2. **Threat Vector Waterfall**: Visual breakdown identifying where fraudulent attempts were intercepted (KTP Doc-PAD vs Biometric Mismatch vs Selfie Spoof vs NIK Anomaly).
+3. **Quality & Latency Performance**: P95 microservice latency tracking, Laplacian blur variance distributions, and brightness histograms.
+4. **Compliance Overrides**: Human compliance officers can review evidence images and update decisions (`approved` / `rejected_manual`).
+
+---
+
+## 🛑 Limitations & Scope
+
+- **2D Image Verification**: Designed for standard single-image camera inputs. Dynamic holographic reflection and NFC e-KTP chip reading require physical RFID hardware.
+- **Dukcapil Integration**: Validates mathematical and geographic consistency of NIKs. Direct live civil registry lookup requires licensed governmental institutional credentials.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
